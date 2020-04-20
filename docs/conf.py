@@ -23,7 +23,7 @@ author = 'WSUN'
 
 # The full version, including alpha/beta/rc tags
 release = '2020'
-
+master_doc = 'index'
 
 # -- General configuration ---------------------------------------------------
 
@@ -47,7 +47,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # a list of builtin themes.
 #
 # html_theme = "bizstyle"
-html_theme = "classic"
+html_theme = "nature"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
