@@ -24,16 +24,45 @@ class MOD():
         if self.lang == 'AMPL':
             try:
                 import amplpy
+                # print('initial sucess')
 
             except:
                 print('Error: pyaimms is not installed properly')
 
             if cleanup:
                 amplpy.AMPL().close()
+
             self.interface = amplpy.AMPL()
+            self.interface_lowerlevel = self.interface
+
+        if self.lang == 'Julia':
+
+            try:
+                import julia
+                from julia import JuMP
+                from julia import Main
+                # print('Julia imported sucess')
+            except:
+                print('Error: Julia is not installed properly')
+
+            j = julia.Julia()
+            self.interface = JuMP
+            self.jumpworkspace = Main
+            self.interface_lowerlevel = self.jumpworkspace
+
+        if self.lang == 'MATLAB':
+            try:
+                import matlab.engine
+                # print('matlab.engine imported sucess')
+                # print('matlab does not have object type of model, so using newmodel() point to the project folder of the matlab scripts, and leave modelfile paramter out')
+            except:
+                print('Error: matlab.engine is not installed properly')
+            eng = matlab.engine.start_matlab()
+            self.interface = eng
+            self.interface_lowerlevel = eng
 
     # @classmethod
-    def newmodel(self, modelfile, modelfolder=''):  # abs path
+    def newmodel(self, modelfile=None, modelfolder=None, jumpmod_name = None):  # abs path
         """
         get model hanlder by Interpreting the specified file (script or model or mixed)
 
@@ -43,32 +72,90 @@ class MOD():
         Raises:
             RuntimeError: in case the file does not exist.
         """
-        os.chdir(modelfolder)
-        self.interface.cd(modelfolder)
-        # model = os.path.realpath(os.path.join(modelfolder, modelfile))
+        # modelfolder = os.path.realpath(os.path.join(os.getcwd(), modelfolder))
         # print('Current folder is {}'.format(modelfolder))
+        # modelfile = os.path.realpath(os.path.join(os.getcwd(), modelfolder, modelfile))
+        if self.lang == 'MATLAB':
+            modelfile = None
+            if not modelfolder or jumpmod_name or modelfile:
+                print('please using modelfolder point to the project folder of the matlab scripts, and leave paramters as empty')
+            self.interface_lowerlevel.addpath(self.interface_lowerlevel.genpath(os.path.abspath(modelfolder)))
+            self.interface_lowerlevel.cd(os.path.abspath(modelfolder))
+
+        # if modelfolder:
+        #     modelfile = os.path.realpath(os.path.join(os.getcwd(), modelfolder, modelfile))
+        # else:
+        #     modelfile = os.path.realpath(os.path.join(os.getcwd(), modelfile))
 
         if self.lang == 'AMPL':
+            if modelfolder:
+                self.interface.cd(modelfolder)
             self.interface.read(modelfile)
+
+        if self.lang == 'Julia':
+            if not jumpmod_name:
+                print('Please specify the name of interface model (as str) that defined in Julia file')
+            # if modelfolder:
+            #     self.interface_lowerlevel.cd(modelfolder)
+            self.interface_lowerlevel.include(modelfile)
+            self.jumpmod = getattr(self.jumpworkspace, jumpmod_name)
+            print(self.jumpmod)
+
+
+
+
+    # @classmethod
+    # def getParam(cls, param):
+    #
+    #     pass
+    #
+    # @classmethod
+    # def getVars(cls, *args):
+    #     pass
+
+
+    def getValue(self, Expression):
+        """
+        Get a value  from the underlying model, as a double or
+        a string.
+
+        .. note::
+            for AMPL model, it is limited to scalar value and scalar expression. using getvalues for non-scalar value in AMPL
+
+        Args:
+            Expression: An expression which evaluates to a sclaar
+            value.
+
+        Returns:
+            The value of the expression.
+        """
+        if self.lang == 'AMPL':
+            try:
+                s = self.interface.getValue(Expression)
+            except:
+                s = self.interface.getEntity(Expression).getValues().toDict()
+            return s
+
+        if self.lang == 'Julia':
+            s = self.jumpworkspace.eval('getvalue({})'.format(Expression))
+        return s
+
+    def getValues(self, itemname):
+        """
+        Get a scalar value from the underlying model, as a double or
+        a string.
+
+        Args:
+            Expression: An expression which evaluates to a scalar
+            value.
+
+        Returns:
+            The value of the expression.
+        """
+        # todo: check
+        # s = self.interface.getEntity(itemname).getValues().toDict()
+        # return s
         pass
-
-    @classmethod
-    def getParam(cls, param):
-
-        pass
-
-    @classmethod
-    def getVars(cls, *args):
-        pass
-
-    @classmethod
-    def getValue(cls, param):
-        pass
-
-    @classmethod
-    def getConstraint(cls, param):
-        pass
-
 
 
     def getSets(self):
@@ -91,8 +178,24 @@ class MOD():
         Return:
             a list with the dual data.
         """
-        s = self.interface.getSet(itemname).getValues().toList()
+        s = self.interface.getSet(itemname)
         return s
+
+    def setValues(self, itemname, values):
+        """
+        Get a scalar value from the underlying AMPL interpreter, as a double or
+        a string.
+
+        Args:
+            Expression: An AMPL expression which evaluates to a scalar
+            value.
+
+        Returns:
+            The value of the expression.
+        """
+        self.interface.getEntity(itemname).setValues(values)
+
+
 
     def getConstraints(self):
         """
@@ -114,7 +217,7 @@ class MOD():
         Return:
             a list with the dual data.
         """
-        s = self.interface.getConstraint(itemname).getValues().toList()
+        s = self.interface.getConstraint(itemname)
         return s
 
     def getParams(self):
@@ -134,7 +237,7 @@ class MOD():
         Raises:
             TypeError: if the specified parameter does not exist.
          """
-        s = self.interface.getParameter(itemname).getValues().toDict()
+        s = self.interface.getParameter(itemname)
         return s
 
     def getVars(self):
@@ -154,7 +257,7 @@ class MOD():
         Raises:
             TypeError: if the specified variable does not exist.
          """
-        s = self.interface.getVariable(itemname).getValues().toDict()
+        s = self.interface.getVariable(itemname)
         return s
 
     def solve(self):
@@ -165,7 +268,11 @@ class MOD():
          Raises:
              RuntimeError: if the underlying interpreter is not running.
          """
-        s = self.interface.solve()
+        if self.lang == 'AMPL':
+            s = self.interface.solve()
+
+        if self.lang == 'Julia':
+            s = self.interface.solve(self.jumpmod)
         return s
 
     def getObjectiveValue(self):
@@ -173,8 +280,26 @@ class MOD():
         Get the the current objective. Returns `None` if no objective is set.
 
         """
-        s = self.interface.getCurrentObjective().getValues().toList()[0]
+        if self.lang == 'AMPL':
+            s = self.interface.getCurrentObjective().getValues().toList()[0]
+        if self.lang == 'Julia':
+            s = self.interface.getobjectivevalue(self.jumpmod)
         return s
+
+    def getObjectives(self):
+        """
+        Get all the objectives declared.
+        """
+        self.objs = [s[0] for s in self.interface.getObjectives()]
+        print(self.objs)
+
+    def eval(self, statement, *args, **kwargs):
+        #todo: repoint self.JUMP to self.interface
+
+        return self.interface_lowerlevel.eval(statement, *args, **kwargs)
+
+
+
 
 class data():
     """
@@ -357,15 +482,68 @@ class Set():
 
 
 
+
 if __name__ == '__main__':
 
-    model = MOD(lang='AMPL')
-    model.newmodel(modelfile="Operational-ini.run", modelfolder='julia_ampl/ampl/')
-    model.getSets()
-    model.getSet('sF')
-    model.getConstraints()
-    model.getParam("pG_ub") #.to_markdown()
-    model.solve()
-    model.getConstraints('lambda_pG')
-    model.getConstraint('lambda_pG')
-    print('nice work')
+
+    # model = MOD(lang='Julia')
+    # model.newmodel(modelfile="planningmod.jl", modelfolder='julia_ampl\julia', jumpmod_name='rmp')
+    # model.solve()
+    # model.getObjectiveValue()
+    # model.getValue('rmp[:x_inv][:]')
+    # model.getValue('rmp[:cx]')
+    #
+    # model = MOD(lang='AMPL')
+    # model.newmodel(modelfile="Operational-ini.run", modelfolder='julia_ampl/ampl/')
+    # model.getSets()
+    # model.getParams()
+    # model.getConstraints()
+    # model.solve()
+    # model.getSet('sF')
+    # model.getParam("pG_ub").getValue().toDict() #.to_markdown()
+    # model.getConstraints('lambda_pG')
+    # model.getConstraint('lambda_pG')
+    # model.getValues('pG_ub')
+    # model.setValues('pG_ub', {'Gnucl': 7000})
+    # model.interface.getParameter('pG_ub').setValues({'Gnucl': 7700})
+    # model.getParam("pG_ub").setValue()
+    # model.getObjectiveValue()
+    # model.getValue('oper')
+
+
+    # for modelling languaging doesn't have object type of 'model'
+    # it is possible to directly call a function or evaluate a statement, and return value to python
+    model = MOD(lang='MATLAB')
+    model.newmodel(modelfolder='../Newcastle')
+
+
+
+
+    import pandas as pd
+    import pprint as pp
+    data = pd.read_excel("../Newcastle/Fdhn_Data_ogpf_datapackage.xlsx", sheet_name=None, header=1)
+    data.keys()
+    data['Bus Data']
+
+    [SystemData, EN_SystemData, GN_SystemData] = model.interface.Read_Data("Fdhn_Data_ogpf_datapackage.xlsx", nargout=3)
+    pp.pprint(EN_SystemData)
+    results = model.interface.OGPF_Findhorn(EN_SystemData, GN_SystemData, SystemData, nargout=1)
+    pp.pprint(results)
+    pp.pprint(results['fval'])
+    pp.pprint(results['lambda'])
+    # pp.pprint(results['output']['message'])
+
+
+
+    # data['GT specs'].loc[0, 'elec gen(MW)'] = 0.5
+    # writer = pd.ExcelWriter('Fdhn_Data_ogpf_datapackage.xlsx')
+    # for k, v in data.items():
+    #     v.to_excel(writer, k, index=False)
+    # writer.save()
+    [SystemData, EN_SystemData, GN_SystemData] = model.interface.Read_Data("Fdhn_Data_ogpf_datapackage.xlsx", nargout=3)
+    pp.pprint(EN_SystemData)
+    results = model.interface.OGPF_Findhorn(EN_SystemData, GN_SystemData, SystemData, nargout=1)
+    pp.pprint(results)
+    pp.pprint(results['fval'])
+    # pp.pprint(results['lambda'])
+    # pp.pprint(results['output']['message'])
